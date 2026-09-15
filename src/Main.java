@@ -61,6 +61,10 @@ public class Main {
 
     // --- Fixed behavior ----------------------------------------------------------
     private static final int RCON_TIMEOUT_MS = 5000;
+    /** A reply this long was probably truncated by Minecraft's 4096-byte chunking. */
+    private static final int LIKELY_SPLIT_LENGTH = 4000;
+    /** Short wait for a follow-up chunk; expiring simply means the reply is complete. */
+    private static final int FOLLOW_UP_TIMEOUT_MS = 400;
     /** Idle RCON connections get dropped, so keep one warm with a read-only command. */
     private static final int KEEPALIVE_SECONDS = 60;
     private static final String KEEPALIVE_COMMAND = "list";
@@ -88,6 +92,8 @@ public class Main {
     private static DataInputStream in;
     private static OutputStream out;
     private static int requestId = 0;
+    /** Why the last send failed, so commands.log records a cause and not a phrase. */
+    private static String lastFailure = "";
 
     private static final AtomicBoolean running = new AtomicBoolean(true);
     private static final long startedAt = System.nanoTime();
@@ -196,7 +202,7 @@ public class Main {
         diag("forwarding: " + command);
         String response = sendCommand(command, true);
         if (response == null) {
-            audit("FAIL", command + "  ->  remote server unreachable");
+            audit("FAIL", command + "  ->  " + lastFailure);
             log("Unable to reach the remote server");
             return;
         }
@@ -265,9 +271,10 @@ public class Main {
     // =============================================================================
 
     private static synchronized String sendCommand(String command, boolean echo) {
+        lastFailure = "no connection";
         for (int attempt = 0; attempt < 2; attempt++) {
             if (!ensureConnected()) {
-                return null;
+                continue; // a refused connect still gets the second attempt
             }
             try {
                 String response = execute(command);
@@ -277,10 +284,12 @@ public class Main {
                 return response;
             } catch (SocketTimeoutException e) {
                 // A partial read desyncs the stream, so the socket cannot be reused.
-                diag("timed out waiting for RCON response; dropping connection");
+                lastFailure = "timed out waiting for reply";
+                diag(lastFailure + "; dropping connection");
                 disconnect();
             } catch (IOException e) {
-                diag("RCON transport failure: " + e.getMessage());
+                lastFailure = e.getClass().getSimpleName() + ": " + e.getMessage();
+                diag("RCON transport failure: " + lastFailure);
                 disconnect();
             }
         }
@@ -317,14 +326,16 @@ public class Main {
             out = socket.getOutputStream();
 
             if (!authenticate()) {
-                diag("authentication rejected: check rcon.password");
+                lastFailure = "authentication rejected: check rcon.password";
+                diag(lastFailure);
                 disconnect();
                 return false;
             }
             diag("connected and authenticated");
             return true;
         } catch (IOException e) {
-            diag("connection failed: " + e.getMessage());
+            lastFailure = "connect failed: " + e.getMessage();
+            diag(lastFailure);
             disconnect();
             return false;
         }
@@ -347,27 +358,31 @@ public class Main {
     /**
      * Runs a command and collects the full response.
      *
-     * RCON splits payloads larger than 4096 bytes across several packets with no
-     * end-of-response marker, so a sentinel packet is queued behind the command:
-     * once its reply arrives, everything before it was the command output.
+     * Minecraft splits output larger than one packet into 4096-byte chunks and sends no
+     * end-of-response marker. The Valve convention of bouncing a dummy RESPONSE_VALUE
+     * packet back does not work here: Minecraft answers it with "Unknown request 0" or
+     * drops the connection. Instead, keep reading only while the last chunk came back
+     * full, and treat a short read timeout as the end of the stream.
      */
     private static String execute(String command) throws IOException {
         int commandId = nextId();
-        int sentinelId = nextId();
-
         sendPacket(commandId, TYPE_EXEC_COMMAND, command);
-        sendPacket(sentinelId, TYPE_RESPONSE_VALUE, "");
 
-        StringBuilder body = new StringBuilder();
-        while (true) {
-            Packet packet = readPacket();
-            if (packet.id == sentinelId) {
-                return body.toString();
-            }
-            if (packet.id == commandId) {
+        Packet packet = readPacket();
+        StringBuilder body = new StringBuilder(packet.body);
+
+        while (packet.body.length() >= LIKELY_SPLIT_LENGTH) {
+            socket.setSoTimeout(FOLLOW_UP_TIMEOUT_MS);
+            try {
+                packet = readPacket();
                 body.append(packet.body);
+            } catch (SocketTimeoutException e) {
+                break; // nothing more queued: the response ended on a full-sized chunk
+            } finally {
+                socket.setSoTimeout(RCON_TIMEOUT_MS);
             }
         }
+        return body.toString();
     }
 
     private static void sendPacket(int id, int type, String body) throws IOException {
