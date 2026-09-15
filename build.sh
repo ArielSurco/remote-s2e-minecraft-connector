@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.1.1"
+VERSION="$(sed -n 's/.*String VERSION = "\([^"]*\)".*/\1/p' src/Main.java)"
 OUT_DIR="build/classes"
 JAR_NAME="s2e-bridge.jar"
 CONFIG_NAME="connection.properties"

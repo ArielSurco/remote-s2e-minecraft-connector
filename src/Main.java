@@ -41,6 +41,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class Main {
 
+    /** Single source of truth for the version; build.sh reads it from here. */
+    private static final String VERSION = "0.1.2";
+
     private static final String CONNECTION_FILE = "connection.properties";
     /** Append-only record of every line S2E sends, for inspecting its command format. */
     private static final String COMMAND_LOG_FILE = "commands.log";
@@ -99,9 +102,11 @@ public class Main {
     private static final long startedAt = System.nanoTime();
 
     public static void main(String[] args) {
+        diag("s2e-bridge " + VERSION);
         if (!loadConnectionSettings()) {
             System.exit(1);
         }
+        audit("START", "s2e-bridge " + VERSION);
         writeServerFilesIfMissing();
 
         Runtime.getRuntime().addShutdownHook(new Thread(Main::disconnect, "rcon-close"));
@@ -121,6 +126,7 @@ public class Main {
 
     private static void emitBootLog() {
         log("main", "Building unoptimized datafixer");
+        log("main", "S2E RCON bridge " + VERSION);
         log("Server thread", "Starting minecraft server version " + MC_VERSION);
         log("Server thread", "Loading properties");
         log("Server thread", "Default game type: " + GAME_TYPE);
