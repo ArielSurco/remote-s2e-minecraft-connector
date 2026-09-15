@@ -1,0 +1,10 @@
+# Build output
+build/
+
+# Written by the bridge at runtime, next to the jar
+commands.log
+eula.txt
+server.properties
+
+# Local tooling cache
+.atl/
