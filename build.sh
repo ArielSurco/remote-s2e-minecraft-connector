@@ -27,7 +27,9 @@ mkdir -p "$OUT_DIR"
 
 # --release 11 so the jar runs on any Java 11+ runtime, not just the build JDK.
 javac --release 11 -encoding UTF-8 -d "$OUT_DIR" src/Main.java
-jar --create --file "$JAR_NAME" --main-class Main -C "$OUT_DIR" .
+# Stamp the version into the manifest so a jar can be identified without running it.
+printf 'Implementation-Title: s2e-bridge\nImplementation-Version: %s\n' "$VERSION" > "$OUT_DIR/../manifest.txt"
+jar --create --file "$JAR_NAME" --manifest "$OUT_DIR/../manifest.txt" --main-class Main -C "$OUT_DIR" .
 
 # The jar reads this same file at runtime, so never overwrite a filled-in one.
 if [ ! -f "$CONFIG_NAME" ]; then
