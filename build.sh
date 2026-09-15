@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="0.1.0"
 OUT_DIR="build/classes"
 JAR_NAME="s2e-bridge.jar"
 CONFIG_NAME="connection.properties"
+BUNDLE_NAME="s2e-bridge-$VERSION.zip"
 
 # Resolve a working JDK. macOS ships /usr/bin/javac as a stub that only prints an
 # error, so probe by running it rather than by checking PATH.
@@ -43,5 +45,26 @@ CFG
   echo "Created $CONFIG_NAME"
 fi
 
+# Release bundle: extracting it yields a ready-to-use folder, so nobody has to
+# assemble one by hand. The inner folder is unversioned on purpose — the path S2E
+# remembers stays valid, and upgrades happen by dropping in a newer jar.
+STAGE="build/s2e-bridge"
+mkdir -p "$STAGE"
+cp "$JAR_NAME" README.md "$STAGE/"
+cat > "$STAGE/$CONFIG_NAME" <<'CFG'
+# RCON connection to your Minecraft server.
+# All three values are required. See README.md.
+#
+#   host      address of your RCON allocation, without the port
+#   port      the allocation port, matching rcon.port in server.properties
+#   password  exactly what you set as rcon.password in server.properties
+host=
+port=
+password=
+CFG
+
+rm -f "$BUNDLE_NAME"
+(cd build && zip -qr "../$BUNDLE_NAME" s2e-bridge)
+
 rm -rf build
-echo "Built $JAR_NAME with $(javac -version 2>&1)"
+echo "Built $JAR_NAME and $BUNDLE_NAME with $(javac -version 2>&1)"

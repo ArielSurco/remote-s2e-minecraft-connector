@@ -8,3 +8,6 @@ server.properties
 
 # Local tooling cache
 .atl/
+
+# Release bundle
+s2e-bridge-*.zip
